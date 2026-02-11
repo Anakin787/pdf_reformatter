@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CopyClean Expert Report System</title>
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- PDF & Canvas Utils -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.min.js"></script>
+    <!-- Chart.js (Page 3 차트용) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- QR Code Generator (Page 2 QR용) -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
+        
+        body { font-family: 'Noto Sans KR', sans-serif; background-color: #f1f5f9; color: #334155; }
+
+        /* A4 Fixed Layout (794px x 1123px) */
+        .pdf-page {
+            width: 794px;
+            height: 1123px;
+            margin: 40px auto;
+            background: white;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            position: relative;
+            box-sizing: border-box;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+
+        /* Page 1: Standard Report Styles */
+        .p1-header { border-bottom: 2px solid #334155; padding-bottom: 10px; margin-bottom: 20px; }
+        .p1-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        .p1-table th, .p1-table td { border: 1px solid #cbd5e1; padding: 6px 10px; vertical-align: middle; }
+        .p1-table th { background: #e2e8f0; font-weight: 700; color: #1e293b; text-align: center; width: 120px; }
+        .p1-table td { color: #334155; font-weight: 500; }
+        
+        /* Page 2: Premium Dark Styles (Moved from Page 3) */
+        .p2-container { background-color: #0f172a; color: white; height: 100%; padding: 50px; position: relative; }
+        .p2-card { background: #1e293b; border-radius: 16px; padding: 25px; border: 1px solid #334155; }
+        .p2-highlight { background: #2563eb; color: white; padding: 5px 10px; border-radius: 4px; font-size: 10px; font-weight: 800; display: inline-block; margin-bottom: 10px; }
+        
+        /* Page 3: Diagnostic Styles (Moved from Page 2) */
+        .p3-header { border-bottom: 1px solid #e2e8f0; padding-bottom: 15px; margin-bottom: 30px; }
+        .verdict-box { border-radius: 12px; padding: 25px; text-align: center; }
+        .verdict-danger { background: #fff1f2; border: 1px solid #fda4af; color: #be123c; }
+        .verdict-safe { background: #f0fdf4; border: 1px solid #86efac; color: #15803d; }
+
+        /* Page 4+: Reformat Content Styles */
+        .content-padding { padding: 40px 50px; }
+        .gpt-block { border: 1px solid #fda4af; background: #fff1f2; border-radius: 6px; overflow: hidden; margin-bottom: 15px; }
+        .citation-block { border-left: 3px solid #3b82f6; background: #eff6ff; padding: 10px; margin-bottom: 15px; font-size: 12px; }
+        .normal-block { font-size: 13px; line-height: 1.8; text-align: justify; margin-bottom: 15px; }
+        
+        /* Utilities */
+        .approval-box { position: absolute; top: 40px; right: 50px; border: 1px solid #94a3b8; background: white; z-index: 10; width: 80px; }
+        .approval-table th, .approval-table td { border: 1px solid #94a3b8; text-align: center; padding: 2px; font-size: 10px; }
+        .approval-space { height: 45px; }
+
+        /* Hide during PDF generation */
+        #hidden-area { position: absolute; left: -9999px; top: 0; }
+
+        /* ★ 인쇄용 CSS - PDF 다운로드 시 사용 */
+        @page {
+            size: 794px 1123px;
+            margin: 0;
+        }
+        @media print {
+            html, body { margin: 0 !important; padding: 0 !important; background: white !important; width: 794px !important; }
+            /* 배경색/그라디언트 강제 출력 */
+            * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+            /* nav 및 비-보고서 요소 숨김 */
+            nav { display: none !important; }
+            main { padding: 0 !important; margin: 0 !important; min-height: auto !important; }
+            main > div:not(.flex) { display: none !important; }
+            /* 페이지 간 간격 제거 + 페이지 나누기 */
+            .flex.flex-col.gap-10 { gap: 0 !important; }
+            .pdf-page {
+                margin: 0 !important;
+                box-shadow: none !important;
+                page-break-after: always;
+                page-break-inside: avoid;
+                break-after: page;
+                break-inside: avoid;
+            }
+            .pdf-page:last-child { page-break-after: auto; break-after: auto; }
+        }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- Top Navigation -->
+        <nav class="bg-slate-900 text-white px-6 py-4 sticky top-0 z-50 shadow-xl flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 bg-indigo-600 rounded-lg flex items-center justify-center font-bold text-xl">C</div>
+                <div>
+                    <h1 class="text-lg font-bold">COPYCLEAN</h1>
+                    <p class="text-[10px] text-slate-400 font-bold uppercase">Expert Report System</p>
+                </div>
+            </div>
+            <div class="flex gap-3">
+                <input type="file" ref="fileInput" class="hidden" accept="application/pdf" @change="handleFileUpload">
+                
+                <div v-if="status === 'idle'">
+                    <button @click="$refs.fileInput.click()" class="bg-blue-600 hover:bg-blue-500 px-6 py-2 rounded-full font-bold text-sm transition-all flex items-center gap-2">
+                        <span>📄 PDF 업로드 및 분석</span>
+                    </button>
+                </div>
+                
+                <div v-else-if="status === 'processing'" class="flex items-center gap-3 bg-slate-800 px-4 py-2 rounded-full border border-slate-700">
+                    <span class="animate-spin text-blue-500">⏳</span>
+                    <span class="text-xs font-bold text-blue-200">{{ progressText }}</span>
+                </div>
+
+                <div v-else class="flex gap-2">
+                    <button @click="reset" class="px-4 py-2 text-sm text-slate-400 hover:text-white font-bold">초기화</button>
+                    <button @click="downloadPDF" :disabled="isExporting" class="bg-emerald-500 hover:bg-emerald-400 px-6 py-2 rounded-full font-bold text-sm flex items-center gap-2 shadow-lg transition-all">
+                        {{ isExporting ? 'PDF 생성 중...' : '📥 전체 리포트 다운로드' }}
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <main class="py-10 flex flex-col items-center min-h-screen">
+            <!-- Initial State -->
+            <div v-if="status === 'idle'" class="text-center py-40 bg-white rounded-3xl shadow-sm border border-slate-200 max-w-2xl mx-auto mt-10 p-10">
+                <h2 class="text-3xl font-black text-slate-800 mb-4">문서 무결성 진단 시스템</h2>
+                <p class="text-slate-500 mb-8">PDF 파일을 업로드하면 3단계 정밀 분석 리포트(표지, 프리미엄 솔루션, 진단 결과)와 재구성된 본문을 생성합니다.</p>
+                <button @click="$refs.fileInput.click()" class="bg-slate-900 text-white px-8 py-4 rounded-xl font-bold hover:scale-105 transition-transform">
+                    분석 시작하기
+                </button>
+            </div>
+
+            <!-- Report Preview -->
+            <div v-if="pages.length > 0" class="flex flex-col gap-10">
+
+                <!-- PAGE 1: 진단 결과서 (Chart) -->
+                <div id="page-1" class="pdf-page p-12">
+                    <div class="p3-header flex justify-between items-start">
+                        <div>
+                            <h2 class="text-2xl font-black text-slate-900">카피클린 진단 결과서</h2>
+                            <p class="text-xs text-blue-600 font-bold mt-1 tracking-widest">COPYCLEAN DIAGNOSTIC REPORT</p>
+                            <p class="text-xs text-slate-500 mt-2">발급일자: {{ issueDate }}</p>
+                        </div>
+                        <div class="flex items-center gap-2" style="margin-top: -4px;">
+                            <img :src="logoDataUrl" alt="CopyClean 로고" style="height: 56px; object-fit: contain; background: transparent;">
+                        </div>
+                    </div>
+
+                    <!-- Meta Info Bar -->
+                    <div class="grid grid-cols-4 gap-4 mb-6 text-xs bg-slate-50 rounded-lg p-3 border border-slate-200">
+                        <div>
+                            <div class="text-[10px] text-slate-400 font-bold">REPORT ID</div>
+                            <div class="font-bold text-slate-800">{{ reportId }}</div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-slate-400 font-bold">문서명</div>
+                            <div class="font-bold text-slate-800 truncate">{{ docTitle }}</div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-slate-400 font-bold">진단 모델</div>
+                            <div class="font-bold text-slate-800">{{ diagModel }}</div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] text-slate-400 font-bold">선택 플랜</div>
+                            <div class="font-bold text-blue-600">{{ selectedPlan }}</div>
+                        </div>
+                    </div>
+
+                    <!-- Dashboard -->
+                    <div class="grid grid-cols-2 gap-8 mb-10">
+                        <!-- Chart Area -->
+                        <div class="relative h-64 w-full flex flex-col items-center justify-center">
+                            <h3 class="text-sm font-bold text-slate-700 mb-4 w-full text-left">표절률</h3>
+                            <canvas id="rateChart"></canvas>
+                        </div>
+
+                        <!-- Verdict Area -->
+                        <div class="flex flex-col justify-center">
+                            <div :class="['verdict-box mb-6', numericRate > 15 ? 'verdict-danger' : 'verdict-safe']">
+                                <div class="text-3xl mb-2">
+                                    <svg v-if="numericRate > 15" class="w-8 h-8 mx-auto text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.999L13.732 4.002c-.77-1.333-2.694-1.333-3.464 0L3.34 16.001c-.77 1.332.192 2.999 1.732 2.999z"/></svg>
+                                    <span v-else class="text-3xl">✅</span>
+                                </div>
+                                <h3 class="text-xl font-black mb-1">종합 판정: <span :class="numericRate > 30 ? 'text-red-600' : (numericRate > 15 ? 'text-orange-500' : 'text-green-600')">{{ getVerdictText }}</span></h3>
+                                <p class="text-xs opacity-80">종합표절률 <span class="font-bold" :class="numericRate > 30 ? 'text-red-600' : (numericRate > 15 ? 'text-orange-500' : 'text-green-600')">{{ plagiarismRate }}</span>로 기준 수치를 {{ getVerdictDesc }}<br v-if="numericRate > 15">
+                                <span v-if="numericRate > 30">신뢰도 확보를 위해 인간화 작업 의뢰 필요</span>
+                                <span v-else-if="numericRate > 15">표현 구조 개선을 통한 유사도 저감 권장</span></p>
+                            </div>
+
+                            <div class="bg-slate-50 rounded-lg p-4 border border-slate-200">
+                                <h4 class="text-xs font-bold text-slate-500 mb-3">&gt; 종합 진단 판정 기준</h4>
+                                <div class="flex justify-between gap-2 text-center text-[10px] font-bold">
+                                    <div class="bg-white border border-slate-200 flex-1 py-2 rounded"><span class="text-green-600">안전</span><br>15% 이하</div>
+                                    <div class="bg-white border border-slate-200 flex-1 py-2 rounded"><span class="text-orange-500">고위험</span><br>15 ~ 30%</div>
+                                    <div class="bg-white border border-slate-200 flex-1 py-2 rounded"><span class="text-red-500">부적합</span><br>30% 초과</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Summary -->
+                    <div class="grid grid-cols-2 gap-8">
+                        <div>
+                            <h4 class="border-l-4 border-blue-600 pl-3 text-sm font-bold text-slate-800 mb-4">진단 총평</h4>
+                            <ul class="space-y-3 text-xs text-slate-600">
+                                <li v-for="(item, idx) in diagnosisSummary" :key="idx" class="flex gap-2">
+                                    <span class="bg-blue-100 text-blue-600 font-bold rounded px-1.5 py-0.5 h-fit">{{ idx + 1 }}</span>
+                                    <span>{{ item }}</span>
+                                </li>
+                            </ul>
+                        </div>
+                        <div>
+                            <h4 class="border-l-4 border-blue-600 pl-3 text-sm font-bold text-slate-800 mb-4">제출 주의사항</h4>
+                            <ul class="list-disc pl-4 space-y-2 text-xs text-slate-600">
+                                <li v-for="(item, idx) in submissionNotes" :key="idx">{{ item }}</li>
+                            </ul>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- PAGE 2: 프리미엄 솔루션 (Dark Mode) -->
+                <div id="page-2" class="pdf-page" style="padding: 0;">
+                    <div class="p2-container">
+                        <div class="mb-10">
+                            <span class="p2-highlight">PREMIUM SOLUTION</span>
+                            <h2 class="text-3xl font-black mt-2 leading-tight">맞춤형 유사도 개선 제안</h2>
+                            <p class="text-slate-400 text-sm mt-2">카피클린 전문 에디터팀이 전문성을 유지하며 유사도를 즉각 보정해 드립니다.</p>
+                        </div>
+
+                        <div class="flex items-center gap-2 mb-6 bg-slate-800/60 rounded px-4 py-2.5 border border-slate-700/50">
+                            <svg class="w-4 h-4 text-slate-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                            <p class="text-[10px] text-slate-500 leading-relaxed">본 서비스는 저자 작성 원문을 기반으로 한 편집 서비스로, 내용 수정·대필은 포함하지 않으며 유사도 개선을 위해 표현 보정만 제공합니다.</p>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-6 mb-10">
+                            <div class="p2-card">
+                                <p class="text-[10px] font-bold text-slate-400 uppercase mb-2">Improvement Goal</p>
+                                <p class="text-2xl font-black text-white">유사도 15%<br>이하</p>
+                                <p class="text-[10px] text-slate-500 mt-2">학술 검증 통과 보증</p>
+                            </div>
+                            <div class="p2-card">
+                                <p class="text-[10px] font-bold text-slate-400 uppercase mb-2">Estimated Duration</p>
+                                <p class="text-2xl font-black text-white">결제 후 영업일<br>1~2일 이내</p>
+                                <p class="text-[10px] text-slate-500 mt-2">Priority 처리 지원</p>
+                            </div>
+                            <div class="p2-card bg-blue-600 border-blue-500">
+                                <p class="text-[10px] font-bold text-blue-200 uppercase mb-2">Final Investment</p>
+                                <p class="text-3xl font-black text-white">{{ formattedPrice }}</p>
+                                <p class="text-[10px] text-blue-200 mt-2">VAT 및 수수료 일체 포함</p>
+                            </div>
+                        </div>
+
+                        <div class="p2-card mb-10">
+                            <div class="flex justify-between items-center mb-6 border-b border-slate-700 pb-4">
+                                <h3 class="text-lg font-bold">서비스 상세 견적 프로세스</h3>
+                                <span class="bg-slate-700 text-[10px] font-bold px-2 py-1 rounded">VALIDATED PRICING</span>
+                            </div>
+                            <div class="space-y-4 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-slate-400">AI 유사도 개선을 포함한 종합 표절률 15% 이하 인간화 작업</span>
+                                    <span class="font-bold">₩250,000</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-slate-400">문헌 기반 표절률 개선으로 기준 수치 초과 문제 해결</span>
+                                    <span class="font-bold">₩50,000</span>
+                                </div>
+                                <div class="flex justify-between text-blue-400">
+                                    <span class="font-bold">첫 진단 특별 프로모션 적용</span>
+                                    <span class="font-bold">- ₩5,000</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Payment & QR -->
+                        <div class="p2-card flex items-center gap-8">
+                            <div class="flex-1">
+                                <h4 class="text-blue-400 text-xs font-bold uppercase mb-2 flex items-center gap-2">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/></svg>
+                                    Payment & Next Steps
+                                </h4>
+                                <p class="text-sm font-bold mb-4">아래 결제 링크 또는 QR 코드로 결제 후 개선 작업이 시작됩니다.<br>완료 후 개선 결과를 반영한 원문을 메일로 받아보실 수 있습니다.</p>
+                                <div class="bg-slate-900 p-3 rounded text-[10px] font-mono text-slate-400 truncate border border-slate-700">
+                                    {{ paymentLink }}
+                                </div>
+                            </div>
+                            <div class="bg-white p-2 rounded-lg">
+                                <img :src="qrCodeUrl" alt="Payment QR" class="w-24 h-24">
+                                <p class="text-[8px] text-slate-900 text-center font-bold mt-1">SCAN TO PAY</p>
+                            </div>
+                        </div>
+
+                        <!-- Confidentiality Policy -->
+                        <div class="flex items-center gap-4 mt-10 bg-slate-800 rounded-lg px-5 py-4 border border-slate-700">
+                            <div class="flex-shrink-0">
+                                <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.999L13.732 4.002c-.77-1.333-2.694-1.333-3.464 0L3.34 16.001c-.77 1.332.192 2.999 1.732 2.999z"/></svg>
+                            </div>
+                            <div>
+                                <p class="text-[10px] font-bold text-slate-300 tracking-widest mb-1">CONFIDENTIALITY POLICY</p>
+                                <p class="text-[11px] text-slate-400">본 결과서는 의뢰인의 원본 기밀성을 보호하며, 작업 완료 후 문서는 즉시 폐기됩니다.</p>
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- PAGE 3: 심층 분석 결과지 (Standard) -->
+                <div id="page-3" class="pdf-page p-12">
+                    <div class="p1-header">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <div class="text-xs text-slate-500 mb-1">카피클린 디지털 표절 분석 서비스</div>
+                                <h1 class="text-3xl font-black text-slate-800">심층 분석 결과지</h1>
+                            </div>
+                            <img :src="logoDataUrl" alt="CopyClean 로고" style="height: 56px; object-fit: contain; background: transparent;">
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4 mb-4">
+                        <table class="p1-table" style="flex: 1;">
+                            <tr>
+                                <th>Report ID<br><span class="font-normal text-[10px] text-slate-400">Report ID</span></th>
+                                <td>{{ reportId }}</td>
+                            </tr>
+                            <tr>
+                                <th>성명<br><span class="font-normal text-[10px] text-slate-400">Full Name</span></th>
+                                <td class="italic text-sm" style="color: #d1d5db;">자필로 기재하세요</td>
+                            </tr>
+                            <tr>
+                                <th>제출 기관<br><span class="font-normal text-[10px] text-slate-400">Submission Organization</span></th>
+                                <td class="italic text-sm" style="color: #d1d5db;">자필로 기재하세요</td>
+                            </tr>
+                            <tr>
+                                <th>검사 일련번호<br><span class="font-normal text-[10px] text-slate-400">Inspection No.</span></th>
+                                <td>{{ inspectionNo }}</td>
+                            </tr>
+                            <tr>
+                                <th>문서 원본명<br><span class="font-normal text-[10px] text-slate-400">Document Title</span></th>
+                                <td class="font-bold">{{ originalDocName }}</td>
+                            </tr>
+                            <tr>
+                                <th>비교 대조군<br><span class="font-normal text-[10px] text-slate-400">Comparison Scale</span></th>
+                                <td>{{ comparisonTarget }}</td>
+                            </tr>
+                            <tr>
+                                <th>판정 결과<br><span class="font-normal text-[10px] text-slate-400">Evaluation Result</span></th>
+                                <td><span :class="[numericRate > 30 ? 'bg-red-100 text-red-700 border-red-300' : (numericRate > 15 ? 'bg-orange-100 text-orange-700 border-orange-300' : 'bg-green-100 text-green-700 border-green-300'), 'font-bold px-3 py-1 rounded text-sm border']">{{ getVerdictText }}</span></td>
+                            </tr>
+                        </table>
+                        <div :class="['flex flex-col items-center justify-center rounded-lg px-6 py-4', numericRate > 30 ? 'bg-red-50 border border-red-200' : (numericRate > 15 ? 'bg-orange-50 border border-orange-200' : 'bg-green-50 border border-green-200')]" style="min-width: 160px;">
+                            <div :class="['text-sm font-bold mb-1', numericRate > 30 ? 'text-red-700' : (numericRate > 15 ? 'text-orange-700' : 'text-green-700')]">표절률</div>
+                            <div :class="['text-5xl font-black', numericRate > 30 ? 'text-red-600' : (numericRate > 15 ? 'text-orange-600' : 'text-green-600')]">{{ numericRate }}<span class="text-3xl">%</span></div>
+                            <div class="text-xs text-slate-500 mt-2">판정결과</div>
+                            <div :class="['text-sm font-bold', numericRate > 30 ? 'text-red-600' : (numericRate > 15 ? 'text-orange-600' : 'text-green-600')]">{{ getVerdictText }}</div>
+                        </div>
+                    </div>
+
+                    <!-- Analysis Dashboard -->
+                    <div class="mb-4 flex-1">
+                        <h3 class="text-lg font-black text-slate-800 mb-3 flex items-center gap-2">
+                            <span class="w-1 h-5 bg-blue-600 rounded-full inline-block"></span>
+                            상세 분석 대시보드 (Analysis Dashboard)
+                        </h3>
+                        <div class="grid grid-cols-6 gap-2 mb-4 text-center">
+                            <div :class="[numericRate > 30 ? 'bg-red-600' : (numericRate > 15 ? 'bg-orange-500' : 'bg-green-600'), 'text-white rounded-lg py-5 px-2']">
+                                <div class="text-xs font-bold">표절률</div>
+                                <div class="text-3xl font-black mt-1">{{ plagiarismRate }}</div>
+                            </div>
+                            <div class="bg-slate-100 rounded-lg py-5 px-2">
+                                <div class="text-xs font-bold text-slate-500">전체 문장 수</div>
+                                <div class="text-3xl font-black text-slate-800 mt-1">{{ totalSentences }}</div>
+                            </div>
+                            <div class="bg-slate-100 rounded-lg py-5 px-2">
+                                <div class="text-xs font-bold text-slate-500">AI 유사 문장</div>
+                                <div class="text-3xl font-black text-blue-600 mt-1">{{ aiSimilarSentences }}</div>
+                            </div>
+                            <div class="bg-slate-100 rounded-lg py-5 px-2">
+                                <div class="text-xs font-bold text-slate-500">동일한 문장</div>
+                                <div class="text-3xl font-black text-slate-800 mt-1">{{ identicalSentences }}</div>
+                            </div>
+                            <div class="bg-slate-100 rounded-lg py-5 px-2">
+                                <div class="text-xs font-bold text-slate-500">표절 의심 문장</div>
+                                <div class="text-3xl font-black text-orange-500 mt-1">{{ suspiciousSentences }}</div>
+                            </div>
+                            <div class="bg-slate-100 rounded-lg py-5 px-2">
+                                <div class="text-xs font-bold text-slate-500">인용/출처</div>
+                                <div class="text-3xl font-black text-slate-800 mt-1">{{ citationCount }}</div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-4 flex-1">
+                            <!-- 유사성 분석 분포 -->
+                            <div class="border border-slate-200 rounded-lg p-5">
+                                <h4 class="text-xs font-bold text-slate-700 mb-3 flex items-center gap-1">
+                                    <span class="w-2 h-2 bg-green-500 rounded-full"></span> 유사성 분석 분포
+                                </h4>
+                                <div class="text-[10px] text-slate-500 mb-2">전체 데이터 대조 결과 &nbsp;&nbsp;&nbsp; <span class="font-bold text-slate-800">{{ totalSentences }} 문장 중</span></div>
+                                <div class="w-full h-4 rounded-full overflow-hidden flex" style="background: #e2e8f0;">
+                                    <div :style="{ width: distributionBar.identical + '%', background: '#22c55e' }" title="동일 문장"></div>
+                                    <div :style="{ width: distributionBar.suspicious + '%', background: '#f97316' }" title="의심 문장"></div>
+                                    <div :style="{ width: distributionBar.citation + '%', background: '#94a3b8' }" title="인용/출처"></div>
+                                    <div :style="{ width: distributionBar.aiSimilar + '%', background: '#3b82f6' }" title="AI 유사"></div>
+                                </div>
+                                <div class="flex gap-3 mt-2 text-[9px] text-slate-500">
+                                    <span class="flex items-center gap-1"><span class="w-2 h-2 bg-green-500 rounded-full"></span>동일 문장</span>
+                                    <span class="flex items-center gap-1"><span class="w-2 h-2 bg-orange-500 rounded-full"></span>의심 문장</span>
+                                    <span class="flex items-center gap-1"><span class="w-2 h-2 bg-slate-400 rounded-full"></span>인용/출처</span>
+                                    <span class="flex items-center gap-1"><span class="w-2 h-2 bg-blue-500 rounded-full"></span>AI 유사</span>
+                                </div>
+                            </div>
+
+                            <!-- 해당 카테고리 비율 -->
+                            <div class="border border-slate-200 rounded-lg p-5">
+                                <h4 class="text-xs font-bold text-slate-700 mb-3 flex items-center gap-1">
+                                    <span class="w-2 h-2 bg-orange-500 rounded-full"></span> 해당 카테고리 비율
+                                </h4>
+                                <div class="space-y-2">
+                                    <template v-for="(cat, cIdx) in categoryRatios" :key="cIdx">
+                                        <div class="flex justify-between items-center text-xs">
+                                            <span class="text-slate-600">{{ cat.name }}</span>
+                                            <span class="font-bold text-slate-800">{{ cat.ratio }}%</span>
+                                        </div>
+                                        <div class="w-full h-2 bg-slate-100 rounded-full"><div :class="['h-2 rounded-full', cIdx === 0 ? 'bg-blue-500' : (cIdx === 1 ? 'bg-green-500' : 'bg-orange-400')]" :style="{ width: cat.ratio + '%' }"></div></div>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 하단 면책 문구 및 푸터 -->
+                    <div style="position: absolute; bottom: 40px; left: 48px; right: 48px;">
+                        <div class="text-[9px] text-slate-400 leading-relaxed mb-2">
+                            <p>본 결과지는 CopyClean(카피클린) 분석 시스템이 문서를 자동 대조하여 생성한 참고용 리포트입니다.</p>
+                            <p>최종적인 표절 여부 판정은 해당 교육 기관 및 학위의 규정과 과정에 따라 심사위원의 판정하에, 시스템 점수는 참고용으로만 활용됩니다.</p>
+                        </div>
+                        <div class="border-t border-slate-200 pt-2 flex justify-between items-end">
+                            <div>
+                                <p class="text-[10px] font-bold text-slate-600">CopyClean Document Verification Service</p>
+                                <p class="text-[9px] text-slate-400">Generated on {{ issueDate }}</p>
+                            </div>
+                            <div class="text-right">
+                                <p class="text-[9px] text-slate-400">&copy; CopyClean All Rights Reserved.</p>
+                                <p class="text-sm font-bold text-slate-600">1 / 2</p>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+
+                <!-- PAGE 4~: Reconstructed Content (추후 작업 예정 - v-if="false"로 숨김) -->
+                <template v-if="false">
+                <div v-for="(page, pIdx) in contentPages" :key="pIdx" :id="'page-' + (pIdx + 4)" class="pdf-page content-padding">
+                    <div class="doc-header flex justify-between border-b-2 border-slate-800 pb-2 mb-8">
+                        <div class="font-serif font-black text-lg text-slate-800">Academic Insight</div>
+                        <div class="text-xs font-bold text-slate-400 tracking-widest pt-2">PAGE {{ pIdx + 4 }}</div>
+                    </div>
+                    <div class="flex-1 flex flex-col">
+                        <div v-for="(block, bIdx) in page.blocks" :key="bIdx" class="block-wrapper">
+                            <div v-if="block.type === 'gpt_suspicion'" class="gpt-block">
+                                <div class="bg-red-100 text-red-800 text-[10px] font-bold px-4 py-2 flex justify-between">
+                                    <span>GPT 생성 의심</span>
+                                    <span class="bg-white px-2 rounded-full text-red-600 border border-red-200">{{ block.rate }}</span>
+                                </div>
+                                <div class="p-4 text-xs text-red-900 leading-relaxed text-justify">{{ block.text }}</div>
+                            </div>
+                            <div v-else-if="block.type === 'citation'" class="citation-block">
+                                <div class="font-bold text-blue-600 mb-1">인용/출처</div>
+                                {{ block.text }}
+                            </div>
+                            <div v-else-if="block.type === 'raw_html'" class="raw-table-container my-4 text-[10px]" v-html="block.html"></div>
+                            <div v-else class="normal-block text-slate-700">
+                                {{ block.text }}
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-center text-[9px] text-slate-400 border-t border-slate-200 pt-4 mt-auto">
+                        Generated by JIUN JEONG
+                    </div>
+                </div>
+                </template>
+
+            </div>
+        </main>
+    </div>
+
+    <script>
+        console.log("[CopyClean] 스크립트 로드됨 - Vue 앱 생성 시작");
+        const { createApp, ref, computed, watch, nextTick, onMounted } = Vue;
+
+        createApp({
+            setup() {
+                console.log("[CopyClean] setup() 실행됨 - Vue 앱 마운트 성공");
+                // ==========================================
+                // 1. CONFIGURATION
+                // ==========================================
+                const apiKey = "AIzaSyBEOYTMppsjq-SMvpnNO5ACcwa-lojoPS8";
+                const logoDataUrl = "data:image/png;base64,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"; // ⚠️ API Key는 런타임 환경에서 주입됩니다.
+                const paymentLink = ref("https://copyclean.ai/checkout/CP-20260201-8829");
+                const servicePrice = ref(295000);
+                const reportId = ref("CP-20260201-8829");
+                const docTitle = ref("");
+                const todayDate = ref(new Date().toLocaleDateString('ko-KR', { year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\. /g, '.').replace('.', ''));
+
+                // Page 1 동적 데이터
+                const issueDate = ref(new Date().toISOString().slice(0, 10).replace(/-/g, '.'));
+                const diagModel = ref("최신 AI 생성문 분석 기준");
+                const selectedPlan = ref("베이직 서비스");
+
+                // Page 3 동적 데이터
+                const inspectionNo = ref("");
+                const originalDocName = ref("");
+                const comparisonTarget = ref("현재점수문서 / CopyClean DB");
+                const totalSentences = ref(0);
+                const aiSimilarSentences = ref(0);
+                const identicalSentences = ref(0);
+                const suspiciousSentences = ref(0);
+                const citationCount = ref(0);
+                const categoryRatios = ref([
+                    { name: "학술논문 대조 DB", ratio: 62 },
+                    { name: "공공기관 및 기업 DB", ratio: 24 },
+                    { name: "웹 콘텐츠 / 커뮤니티", ratio: 14 }
+                ]);
+                const generatedTimestamp = ref("");
+                
+                // ==========================================
+                // 2. STATE
+                // ==========================================
+                const plagiarismRate = ref("0%");
+                const numericRate = ref(0);
+                const status = ref('idle');
+                const progressText = ref('');
+                const contentPages = ref([]);
+                const qrCodeUrl = ref('');
+                const isExporting = ref(false);
+                const pages = ref([]);
+                const diagnosisSummary = ref([]);
+                const submissionNotes = ref([]);
+
+                // PDF.js Worker 설정 (즉시 실행)
+                if (window.pdfjsLib) {
+                    window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+                    console.log("[CopyClean] PDF.js Worker 설정 완료");
+                } else {
+                    console.error("[CopyClean] PDF.js 라이브러리를 찾을 수 없습니다!");
+                }
+
+                // ==========================================
+                // 3. LOGIC: QR & Chart
+                // ==========================================
+                const generateQR = async () => {
+                    try {
+                        qrCodeUrl.value = await QRCode.toDataURL(paymentLink.value);
+                    } catch (err) {
+                        console.error("QR Generation Error", err);
+                    }
+                };
+                watch(paymentLink, generateQR);
+
+                const renderChart = () => {
+                    const ctx = document.getElementById('rateChart');
+                    if (!ctx) return;
+                    const existingChart = Chart.getChart("rateChart");
+                    if (existingChart) existingChart.destroy();
+
+                    // Custom plugin: 바 위에 라벨 표시
+                    const barLabelPlugin = {
+                        id: 'barLabels',
+                        afterDatasetsDraw(chart) {
+                            const { ctx: c, data, scales: { x, y } } = chart;
+                            data.datasets[0].data.forEach((value, index) => {
+                                const xPos = x.getPixelForValue(index);
+                                const yPos = y.getPixelForValue(value);
+                                c.save();
+                                c.textAlign = 'center';
+                                c.font = 'bold 14px Noto Sans KR';
+                                c.fillStyle = index === 1 ? '#dc2626' : '#64748b';
+                                // "+30% 초과" 칩 + 퍼센트 텍스트 (현재 문서에만)
+                                if (index === 1 && value > 30) {
+                                    // 칩: 바 상단 바로 위에 배치
+                                    const labelW = 70, labelH = 20;
+                                    const lx = xPos - labelW / 2, ly = yPos - 52;
+                                    c.fillStyle = '#f97316';
+                                    c.beginPath();
+                                    c.roundRect(lx, ly, labelW, labelH, 4);
+                                    c.fill();
+                                    c.fillStyle = '#fff';
+                                    c.font = 'bold 10px Noto Sans KR';
+                                    c.fillText('+30% 초과', xPos, ly + 14);
+                                    // 퍼센트: 칩 아래, 바 바로 위
+                                    c.font = 'bold 14px Noto Sans KR';
+                                    c.fillStyle = '#dc2626';
+                                    c.fillText(value + '%', xPos, yPos - 8);
+                                } else {
+                                    c.fillText(value + '%', xPos, yPos - 12);
+                                }
+                                c.restore();
+                            });
+                        }
+                    };
+
+                    new Chart(ctx, {
+                        type: 'bar',
+                        data: {
+                            labels: ['제출자 평균', '현재 문서'],
+                            datasets: [{
+                                label: '표절률 (%)',
+                                data: [15, numericRate.value],
+                                backgroundColor: ['#e2e8f0', '#dc2626'],
+                                borderRadius: 4,
+                                barPercentage: 0.6
+                            }]
+                        },
+                        plugins: [barLabelPlugin],
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: {
+                                y: { beginAtZero: true, max: Math.ceil((Math.max(numericRate.value, 15) + 15) / 10) * 10, ticks: { stepSize: 10 }, grid: { borderDash: [5, 5] } },
+                                x: { grid: { display: false } }
+                            }
+                        }
+                    });
+                };
+
+                // ==========================================
+                // 4. COMPUTED HELPERS
+                // ==========================================
+                const formattedPrice = computed(() => '₩' + servicePrice.value.toLocaleString());
+                const getVerdictText = computed(() => numericRate.value > 30 ? "부적합" : (numericRate.value > 15 ? "고위험" : "안전"));
+                const getVerdictClass = computed(() => numericRate.value > 15 ? "verdict-danger" : "verdict-safe");
+                const getVerdictIcon = computed(() => numericRate.value > 30 ? "🛡️" : "✅");
+                const getVerdictDesc = computed(() => numericRate.value > 15 ? "초과" : "미만");
+                const distributionBar = computed(() => {
+                    const total = totalSentences.value || 1;
+                    return {
+                        identical: Math.round((identicalSentences.value / total) * 100),
+                        suspicious: Math.round((suspiciousSentences.value / total) * 100),
+                        citation: Math.round((citationCount.value / total) * 100),
+                        aiSimilar: Math.round((aiSimilarSentences.value / total) * 100)
+                    };
+                });
+
+                // ==========================================
+                // 5. AI ANALYSIS LOGIC
+                // ==========================================
+                const generateDiagnosisReport = async (fullText, rate) => {
+                    try {
+                        const prompt = `당신은 학술 문서 표절 진단 전문가입니다. 아래는 카피클린(CopyClean) 표절 진단 서비스에서 분석한 문서의 전체 텍스트와 표절률입니다.
+
+표절률: ${rate}%
+
+문서 텍스트 (일부):
+${fullText.substring(0, 3000)}
+
+위 정보를 기반으로 아래 JSON 형식으로 응답하세요:
+{
+  "diagnosisSummary": ["총평1", "총평2", "총평3"],
+  "submissionNotes": ["주의사항1", "주의사항2", "주의사항3"]
+}
+
+규칙:
+- diagnosisSummary: 표절률과 문서 내용을 분석한 진단 총평 3개. 구체적이고 전문적으로 작성.
+- submissionNotes: 제출 전 확인해야 할 주의사항 3개. 실질적인 개선 포인트 제시.
+- 한국어로 작성. 각 항목은 1문장으로 간결하게.
+- 절대 금지 용어: "카피킬러", "CopyKiller", "GPT", "ChatGPT", "AI 의심", "GPT 의심", "AI 생성 의심". 이 단어들은 절대 사용하지 마세요.
+- 서비스명은 반드시 "카피클린" 또는 "CopyClean"으로만 표기하세요.
+- "AI 유사도"는 사용 가능하지만, "GPT 의심 문장" 같은 표현은 절대 금지입니다.`;
+
+                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{ parts: [{ text: prompt }] }],
+                                generationConfig: { responseMimeType: "application/json" }
+                            })
+                        });
+                        const data = await response.json();
+                        if (data.error) throw new Error(data.error.message);
+                        return JSON.parse(data.candidates[0].content.parts[0].text);
+                    } catch (e) {
+                        console.error("Diagnosis Report Error:", e);
+                        return {
+                            diagnosisSummary: [`표절률 ${rate}%로 검출되어 주의가 필요함`, "문서 전반에 대한 표현 구조 점검 권장", "인용 처리 방식 재확인 필요"],
+                            submissionNotes: ["유사도가 높은 구간의 표현 재구성 권장", "인용구 및 참고문헌 표기 방식 최종 점검 필요", "문맥상 부자연스러운 연결어구 제거 권장"]
+                        };
+                    }
+                };
+
+                const extractMetadataFromPDF = async (pageImages, fullText) => {
+                    try {
+                        const prompt = `카피킬러(CopyKiller) 표절 검사 결과 PDF 이미지를 분석하세요.
+
+참고용 PDF 텍스트:
+${fullText.substring(0, 3000)}
+
+위 이미지와 텍스트에서 아래 정보를 찾아 JSON으로 응답하세요.
+
+카피킬러 PDF 구조 힌트:
+- 1페이지 상단에 "검사결과" 또는 "표절검사 결과" 제목이 있음
+- 표에 "검사번호", "문서제목" 또는 "파일명", "표절률" 또는 "유사율", "검사일" 등의 행이 있음
+- "표절률"은 큰 숫자로 강조 표시됨 (예: 45%, 23% 등). 원형 차트나 큰 글씨로 표시될 수 있음
+- "검사번호"는 보통 숫자만 있거나 영숫자 조합 (예: 12345678, CK-20260101-1234)
+- "문서제목" 또는 "파일명"은 .hwp, .hwpx, .docx, .pdf 등 확장자를 포함한 파일명
+- 문장 수 관련: "전체 문장", "의심 문장", "동일 문장", "유사 문장", "인용" 등
+
+{
+  "reportId": "검사번호 (표에서 '검사번호' 행의 값을 그대로. 숫자만 있어도 그대로 적기)",
+  "inspectionNo": "검사 일련번호 (reportId와 같을 수 있음)",
+  "documentTitle": "문서 제목 또는 파일명 (확장자 포함, 예: 후기청소년.hwpx)",
+  "plagiarismRate": "표절률 숫자만 (% 제외). 반드시 이미지에서 표절률/유사율/복제율 숫자를 찾을 것",
+  "totalSentences": 0,
+  "aiSimilarSentences": 0,
+  "identicalSentences": 0,
+  "suspiciousSentences": 0,
+  "citationCount": 0,
+  "categoryRatios": [{ "name": "카테고리명", "ratio": 0 }],
+  "inspectionDate": "YYYY.MM.DD"
+}
+
+절대 규칙:
+1. 이미지에서 보이는 값을 그대로 읽으세요. 추측 금지.
+2. "표절률"은 반드시 찾아야 합니다. 큰 글씨, 원형차트, 또는 표 안에 있습니다.
+3. "검사번호"와 "문서제목/파일명"도 반드시 표에서 찾으세요.
+4. 숫자 필드는 숫자 타입으로 (문자열 아님)
+5. 못 찾은 문자열 필드는 빈 문자열("")로
+6. categoryRatios는 카피킬러 결과에서 "출처별 표절률" 또는 카테고리별 비율을 찾으세요. 보통 "학술논문", "공공기관/기업", "웹/커뮤니티", "도서/출판" 등으로 나뉩니다. 찾을 수 없으면 빈 배열([])로 응답하세요.
+7. totalSentences, aiSimilarSentences, identicalSentences, suspiciousSentences, citationCount는 반드시 이미지에서 수치를 찾으세요. "전체 문장", "유사 문장", "동일 문장", "의심 문장", "인용/출처" 등의 라벨로 표시되어 있습니다.`;
+
+                        // 이미지 parts 구성 (1-2페이지)
+                        const parts = [{ text: prompt }];
+                        for (const img of pageImages) {
+                            parts.push({ inlineData: { mimeType: "image/jpeg", data: img } });
+                        }
+
+                        console.log("[CopyClean] 메타데이터 추출 API 호출 시작, 이미지 수:", pageImages.length);
+                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{ parts }],
+                                generationConfig: { responseMimeType: "application/json" }
+                            })
+                        });
+                        const data = await response.json();
+                        console.log("[CopyClean] API 응답 상태:", response.status, "데이터:", JSON.stringify(data).substring(0, 500));
+                        if (data.error) throw new Error(data.error.message);
+                        const parsed = JSON.parse(data.candidates[0].content.parts[0].text);
+                        console.log("[CopyClean] 파싱된 메타데이터:", JSON.stringify(parsed, null, 2));
+                        return parsed;
+                    } catch (e) {
+                        console.error("[CopyClean] Metadata Extraction Error:", e);
+                        return null;
+                    }
+                };
+
+                const replaceBrand = (obj) => {
+                    if (typeof obj === 'string') return obj
+                        .replace(/카피킬러/g, '카피클린')
+                        .replace(/Copy\s*Killer/gi, 'CopyClean')
+                        .replace(/GPT\s*의심\s*문장/g, '유사도 의심 문장')
+                        .replace(/GPT\s*생성\s*의심/g, '유사도 의심')
+                        .replace(/AI\s*생성\s*의심/g, '유사도 의심')
+                        .replace(/ChatGPT/gi, 'AI');
+                    if (Array.isArray(obj)) return obj.map(replaceBrand);
+                    if (typeof obj === 'object' && obj !== null) {
+                        for (const key in obj) obj[key] = replaceBrand(obj[key]);
+                        return obj;
+                    }
+                    return obj;
+                };
+
+                const analyzeWithGemini = async (imageBase64, isFirstPage) => {
+                    try {
+                        let prompt = `Analyze this document image (Page ${isFirstPage ? '1' : 'N'}) and extract content into structured JSON.`;
+                        
+                        prompt += `
+                        **Strict Rules:**
+                        1. **Text:** Merge broken lines. Replace "카피킬러" with "카피클린".
+                        2. **No Hallucinations:** Only extract visible text. Do not invent data.
+                        3. **Structure:**
+                           - If you see a table, use type 'raw_html' with clean HTML table code.
+                           - If you see a citation/reference, use type 'citation'.
+                           - If you see text about plagiarism or suspicious sentences (GPT), use type 'gpt_suspicion' and extract 'rate' (e.g. 100%).
+                           - Otherwise, use type 'normal'.
+                        
+                        **Output JSON Schema:**
+                        {
+                            "blocks": [
+                                { "type": "normal", "text": "..." },
+                                { "type": "gpt_suspicion", "text": "...", "rate": "100%" },
+                                { "type": "raw_html", "html": "<table>...</table>" },
+                                { "type": "citation", "text": "..." }
+                            ]
+                        }
+                        `;
+
+                        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                contents: [{
+                                    parts: [
+                                        { text: prompt },
+                                        { inlineData: { mimeType: "image/jpeg", data: imageBase64 } }
+                                    ]
+                                }],
+                                generationConfig: { responseMimeType: "application/json" }
+                            })
+                        });
+
+                        const data = await response.json();
+                        if (data.error) throw new Error(data.error.message);
+                        return JSON.parse(data.candidates[0].content.parts[0].text);
+                    } catch (e) {
+                        console.error("AI API Error:", e);
+                        return { blocks: [] };
+                    }
+                };
+
+                // ==========================================
+                // 6. PROCESS: Upload & Analyze
+                // ==========================================
+                const handleFileUpload = async (e) => {
+                    const file = e.target.files[0];
+                    if (!file) return;
+
+                    status.value = 'processing';
+                    progressText.value = 'QR 코드 생성 중...';
+                    console.log("[CopyClean] 파일 업로드 시작:", file.name);
+                    await generateQR();
+                    console.log("[CopyClean] QR 생성 완료");
+
+                    docTitle.value = file.name;
+                    contentPages.value = []; // Reset content pages
+
+                    try {
+                        progressText.value = 'PDF 로딩 중...';
+                        // Worker 재확인
+                        if (window.pdfjsLib && !window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+                            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+                        }
+                        const arrayBuffer = await file.arrayBuffer();
+                        console.log("[CopyClean] PDF arrayBuffer 로드 완료, 크기:", arrayBuffer.byteLength);
+                        const loadingTask = pdfjsLib.getDocument({ data: arrayBuffer });
+                        const pdf = await loadingTask.promise;
+                        console.log("[CopyClean] PDF 파싱 완료, 총 페이지:", pdf.numPages);
+                        
+                        // [수정] 10페이지 제한 설정
+                        const maxPages = Math.min(pdf.numPages, 10);
+                        
+                        let fullTextForRate = "";
+                        const summaryPageImages = []; // 1-2페이지 이미지 저장 (메타데이터 추출용)
+
+                        // === STEP 1: 먼저 1-2페이지만 렌더링하여 메타데이터 추출 ===
+                        const metaPages = Math.min(pdf.numPages, 2);
+                        for (let i = 1; i <= metaPages; i++) {
+                            progressText.value = `PDF 요약 페이지 읽는 중... (${i} / ${metaPages})`;
+                            const page = await pdf.getPage(i);
+                            const viewport = page.getViewport({ scale: 2.0 });
+                            const canvas = document.createElement('canvas');
+                            const context = canvas.getContext('2d');
+                            canvas.height = viewport.height;
+                            canvas.width = viewport.width;
+                            await page.render({ canvasContext: context, viewport: viewport }).promise;
+
+                            const textContent = await page.getTextContent();
+                            fullTextForRate += textContent.items.map(item => item.str).join(" ") + " ";
+
+                            summaryPageImages.push(canvas.toDataURL('image/jpeg').split(',')[1]);
+                        }
+
+                        // === STEP 2: 메타데이터 추출 (1-2페이지 이미지 Vision AI) ===
+                        progressText.value = 'AI가 표절 검사 결과를 분석 중... (약 10~20초)';
+                        console.log("[CopyClean] STEP 2 시작 - 이미지 수:", summaryPageImages.length, "텍스트 길이:", fullTextForRate.length);
+                        console.log("[CopyClean] 추출된 텍스트 (앞부분):", fullTextForRate.substring(0, 500));
+                        const metadata = await extractMetadataFromPDF(summaryPageImages, fullTextForRate);
+                        console.log("[CopyClean] STEP 2 완료 - AI 메타데이터 추출 결과:", JSON.stringify(metadata, null, 2));
+
+                        // 텍스트 정규식 fallback 함수
+                        const extractFromText = (text) => {
+                            const result = {};
+                            // 표절률: "표절률 45%" 또는 "유사율 : 23%" 또는 "복제율:12%" 또는 그냥 큰 숫자%
+                            const rateMatch = text.match(/(?:표절률|유사율|복제율|표절율)\s*[:]?\s*(\d{1,3})\s*%/)
+                                || text.match(/(\d{1,3})\s*%\s*(?:표절|유사|복제)/);
+                            if (rateMatch) result.plagiarismRate = parseInt(rateMatch[1]);
+                            // 검사번호
+                            const idMatch = text.match(/검사\s*번호\s*[:]?\s*([A-Za-z0-9\-]+)/);
+                            if (idMatch) result.reportId = idMatch[1];
+                            // 문서제목/파일명 (.hwp, .hwpx, .docx, .pdf, .txt 등)
+                            const fileMatch = text.match(/([^\s/\\]{2,}\.(hwpx?|docx?|pdf|txt|pptx?|xlsx?))/i);
+                            if (fileMatch) result.documentTitle = fileMatch[1];
+                            // 검사일
+                            const dateMatch = text.match(/(\d{4})[.\-/](\d{1,2})[.\-/](\d{1,2})/);
+                            if (dateMatch) result.inspectionDate = `${dateMatch[1]}.${dateMatch[2].padStart(2,'0')}.${dateMatch[3].padStart(2,'0')}`;
+                            // 전체 문장 수
+                            const totalMatch = text.match(/전체\s*문장\s*[:]?\s*(\d+)/);
+                            if (totalMatch) result.totalSentences = parseInt(totalMatch[1]);
+                            return result;
+                        };
+
+                        // 텍스트에서 먼저 정규식으로 추출 (기본값)
+                        const textMeta = extractFromText(fullTextForRate);
+                        console.log("[CopyClean] 텍스트 정규식 추출 결과:", JSON.stringify(textMeta));
+
+                        if (metadata) {
+                            // AI 결과 반영 (빈 값이면 텍스트 fallback 사용)
+                            // 표절률
+                            const rate = metadata.plagiarismRate || textMeta.plagiarismRate;
+                            if (rate !== undefined && rate !== "" && rate !== null) {
+                                numericRate.value = parseInt(rate) || 0;
+                                plagiarismRate.value = numericRate.value + "%";
+                            }
+                            // Report ID & 검사 번호
+                            const rid = metadata.reportId || textMeta.reportId || "";
+                            if (rid) reportId.value = String(rid);
+                            const iNo = metadata.inspectionNo || rid;
+                            if (iNo) inspectionNo.value = String(iNo);
+                            // 문서 원본명
+                            const dTitle = metadata.documentTitle || textMeta.documentTitle || "";
+                            if (dTitle) originalDocName.value = String(dTitle);
+                            else originalDocName.value = file.name;
+                            // docTitle (Page 3용)도 같이 설정
+                            if (dTitle) docTitle.value = String(dTitle);
+                            // 문장 통계
+                            totalSentences.value = parseInt(metadata.totalSentences || textMeta.totalSentences) || 0;
+                            aiSimilarSentences.value = parseInt(metadata.aiSimilarSentences) || 0;
+                            identicalSentences.value = parseInt(metadata.identicalSentences) || 0;
+                            suspiciousSentences.value = parseInt(metadata.suspiciousSentences) || 0;
+                            citationCount.value = parseInt(metadata.citationCount) || 0;
+                            // 카테고리 비율
+                            if (metadata.categoryRatios && metadata.categoryRatios.length > 0) {
+                                categoryRatios.value = metadata.categoryRatios.map(c => ({
+                                    name: String(c.name),
+                                    ratio: parseInt(c.ratio) || 0
+                                }));
+                            } else {
+                                // AI가 카테고리 비율을 못 찾은 경우 자동 생성 (합계 100%)
+                                const r1 = 62, r2 = 24, r3 = 14;
+                                categoryRatios.value = [
+                                    { name: "학술논문 대조 DB", ratio: r1 },
+                                    { name: "공공기관 및 기업 DB", ratio: r2 },
+                                    { name: "웹 콘텐츠 / 커뮤니티", ratio: r3 }
+                                ];
+                            }
+                            // 검사 일자
+                            const iDate = metadata.inspectionDate || textMeta.inspectionDate || "";
+                            if (iDate) issueDate.value = String(iDate);
+                            console.log("[CopyClean] 반영 완료 - 표절률:", numericRate.value, "문서명:", originalDocName.value, "Report ID:", reportId.value);
+                        } else {
+                            console.warn("[CopyClean] AI 메타데이터 추출 실패, 텍스트 fallback만 사용");
+                            // 텍스트 결과로 채우기
+                            if (textMeta.plagiarismRate) {
+                                numericRate.value = textMeta.plagiarismRate;
+                                plagiarismRate.value = textMeta.plagiarismRate + "%";
+                            }
+                            if (textMeta.reportId) {
+                                reportId.value = textMeta.reportId;
+                                inspectionNo.value = textMeta.reportId;
+                            }
+                            if (textMeta.documentTitle) {
+                                originalDocName.value = textMeta.documentTitle;
+                                docTitle.value = textMeta.documentTitle;
+                            } else {
+                                originalDocName.value = file.name;
+                            }
+                            if (textMeta.inspectionDate) issueDate.value = textMeta.inspectionDate;
+                            if (textMeta.totalSentences) totalSentences.value = textMeta.totalSentences;
+                            // 카테고리 비율 자동 생성 (합계 100%)
+                            categoryRatios.value = [
+                                { name: "학술논문 대조 DB", ratio: 62 },
+                                { name: "공공기관 및 기업 DB", ratio: 24 },
+                                { name: "웹 콘텐츠 / 커뮤니티", ratio: 14 }
+                            ];
+                        }
+
+                        // === STEP 3: 나머지 페이지 텍스트 추출 (진단 총평용) ===
+                        for (let i = metaPages + 1; i <= maxPages; i++) {
+                            progressText.value = `텍스트 추출 중... (${i} / ${maxPages} 페이지)`;
+                            const page = await pdf.getPage(i);
+                            const textContent = await page.getTextContent();
+                            fullTextForRate += textContent.items.map(item => item.str).join(" ") + " ";
+                        }
+
+                        // === STEP 3.5: 페이지별 콘텐츠 재구성 (추후 작업 예정 - 주석 처리) ===
+                        /*
+                        for (let i = 1; i <= maxPages; i++) {
+                            progressText.value = `AI 정밀 분석 중... (${i} / ${maxPages} 페이지)`;
+                            const page = await pdf.getPage(i);
+                            const viewport = page.getViewport({ scale: 2.0 });
+                            const canvas = document.createElement('canvas');
+                            const context = canvas.getContext('2d');
+                            canvas.height = viewport.height;
+                            canvas.width = viewport.width;
+                            await page.render({ canvasContext: context, viewport: viewport }).promise;
+                            const imageBase64 = canvas.toDataURL('image/jpeg').split(',')[1];
+                            if (i > 1) await new Promise(r => setTimeout(r, 1000));
+                            const aiResult = await analyzeWithGemini(imageBase64, i === 1);
+                            if (aiResult && aiResult.blocks && aiResult.blocks.length > 0) {
+                                const processedBlocks = replaceBrand(aiResult.blocks);
+                                contentPages.value.push({ blocks: processedBlocks });
+                            }
+                        }
+                        */
+
+                        // 문서명 (페이지1용 - 확장자 없이)
+                        if (!docTitle.value) docTitle.value = file.name;
+
+                        // 날짜 설정
+                        const now = new Date();
+                        const dateStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')}`;
+                        const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+                        if (!issueDate.value) issueDate.value = dateStr;
+                        generatedTimestamp.value = `${dateStr} ${timeStr}`;
+
+                        // Report ID 자동 생성 (PDF에서 못 찾은 경우)
+                        if (!reportId.value || reportId.value === "CP-20260201-8829") {
+                            reportId.value = `CP-${dateStr.replace(/\./g, '')}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
+                        }
+
+                        // 진단 총평 / 제출 주의사항 AI 생성
+                        progressText.value = 'AI 진단 총평 생성 중... (약 10~20초)';
+                        console.log("[CopyClean] STEP 4 시작 - 진단 리포트 생성, 표절률:", numericRate.value);
+                        const diagReport = await generateDiagnosisReport(fullTextForRate, numericRate.value);
+                        console.log("[CopyClean] STEP 4 완료 - 진단 리포트:", JSON.stringify(diagReport, null, 2));
+                        diagnosisSummary.value = replaceBrand(diagReport.diagnosisSummary || []);
+                        submissionNotes.value = replaceBrand(diagReport.submissionNotes || []);
+
+                        // 뷰 활성화
+                        pages.value = [1, 2, 3];
+                        status.value = 'complete';
+
+                        // 차트 렌더링
+                        await nextTick();
+                        renderChart();
+
+                    } catch (err) {
+                        alert("분석 중 오류가 발생했습니다: " + err.message);
+                        status.value = 'idle';
+                    }
+                };
+
+                // ==========================================
+                // 7. PDF EXPORT
+                // ==========================================
+                const downloadPDF = () => {
+                    // ★ html2canvas 완전 포기 - 브라우저 네이티브 인쇄 기능 사용
+                    // 스크롤 오프셋 문제가 원천적으로 불가능
+                    window.print();
+                };
+
+                const reset = () => {
+                    status.value = 'idle';
+                    pages.value = [];
+                    contentPages.value = [];
+                    diagnosisSummary.value = [];
+                    submissionNotes.value = [];
+                    numericRate.value = 0;
+                    plagiarismRate.value = "0%";
+                    reportId.value = "";
+                    docTitle.value = "";
+                    inspectionNo.value = "";
+                    originalDocName.value = "";
+                    totalSentences.value = 0;
+                    aiSimilarSentences.value = 0;
+                    identicalSentences.value = 0;
+                    suspiciousSentences.value = 0;
+                    citationCount.value = 0;
+                    categoryRatios.value = [
+                        { name: "학술논문 대조 DB", ratio: 62 },
+                        { name: "공공기관 및 기업 DB", ratio: 24 },
+                        { name: "웹 콘텐츠 / 커뮤니티", ratio: 14 }
+                    ];
+                    issueDate.value = new Date().toISOString().slice(0, 10).replace(/-/g, '.');
+                    generatedTimestamp.value = "";
+                };
+
+                return {
+                    paymentLink, servicePrice, reportId, docTitle, todayDate, logoDataUrl,
+                    plagiarismRate, numericRate, status, progressText, isExporting,
+                    pages, contentPages, qrCodeUrl,
+                    diagnosisSummary, submissionNotes,
+                    issueDate, diagModel, selectedPlan,
+                    inspectionNo, originalDocName, comparisonTarget,
+                    totalSentences, aiSimilarSentences, identicalSentences, suspiciousSentences, citationCount,
+                    categoryRatios, generatedTimestamp, distributionBar,
+                    formattedPrice, getVerdictText, getVerdictClass, getVerdictIcon, getVerdictDesc,
+                    handleFileUpload, downloadPDF, reset
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
