@@ -58,11 +58,11 @@
         .comp-page-title { font-size: 20px; font-weight: 900; color: #1e293b; letter-spacing: -0.5px; }
         .comp-page-subtitle { font-size: 11px; color: #94a3b8; margin-top: 2px; }
         .comp-divider { height: 2px; background: linear-gradient(to right, #0d9488, #14b8a6); margin: 8px 0 14px 0; border-radius: 2px; }
-        .comp-card { border: 1.5px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 12px; background: white; flex: 1; display: flex; flex-direction: column; }
+        .comp-card { border: 1.5px solid #e2e8f0; border-radius: 8px; overflow: hidden; margin-bottom: 12px; background: white; }
         .comp-card-hdr { display: flex; }
         .comp-card-hdr-l, .comp-card-hdr-r { flex: 1; padding: 6px 12px; display: flex; justify-content: space-between; align-items: center; font-size: 10px; font-weight: 700; }
         .comp-badge { padding: 2px 9px; border-radius: 999px; font-size: 9px; font-weight: 700; white-space: nowrap; }
-        .comp-card-body { display: flex; flex: 1; }
+        .comp-card-body { display: flex; }
         .comp-card-body-l { flex: 1; padding: 10px 12px; border-right: 1px solid #e2e8f0; font-size: 11px; line-height: 1.7; color: #334155; text-align: justify; }
         .comp-card-body-r { flex: 1; padding: 10px 12px; font-size: 10px; line-height: 1.6; color: #475569; display: flex; flex-direction: column; }
         .comp-src-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 10px; margin: 5px 0; font-size: 9.5px; line-height: 1.6; }
@@ -1124,14 +1124,54 @@ JSON 출력:
                                 allComparisons.push(...processed);
                             }
                         }
-                        // 페이지당 4개씩 분배
-                        const ITEMS_PER_PAGE = 4;
-                        for (let i = 0; i < allComparisons.length; i += ITEMS_PER_PAGE) {
-                            contentPages.value.push({
-                                comparisons: allComparisons.slice(i, i + ITEMS_PER_PAGE)
-                            });
+                        // 1차: 넉넉하게 모든 카드를 한 페이지에 넣어 렌더링
+                        contentPages.value = [{ comparisons: allComparisons }];
+                        console.log("[CopyClean] 정밀 분석 완료 - 총 비교 항목:", allComparisons.length);
+
+                        // 렌더 후 실제 높이 기반으로 페이지 재배치
+                        await nextTick();
+                        const PAGE_HEIGHT = 1123; // pdf-page 높이
+                        const PADDING_V = 28 * 2; // content-padding 상하
+                        const FOOTER_H = 30; // 푸터 높이 여유
+                        const FIRST_HEADER_H = 60; // 첫 페이지 대제목 영역
+                        const SUB_HEADER_H = 35; // 이후 페이지 간략 헤더
+
+                        // 임시 렌더된 카드들의 실제 높이 측정
+                        const tempPage = document.getElementById('page-4');
+                        const cardEls = tempPage ? tempPage.querySelectorAll('.comp-card') : [];
+                        const cardHeights = [];
+                        cardEls.forEach(el => {
+                            const style = window.getComputedStyle(el);
+                            const mb = parseFloat(style.marginBottom) || 0;
+                            cardHeights.push(el.offsetHeight + mb);
+                        });
+
+                        // 높이 기반 페이지 분배
+                        const newPages = [];
+                        let currentComps = [];
+                        let usedHeight = 0;
+                        let isFirstPage = true;
+
+                        for (let i = 0; i < allComparisons.length; i++) {
+                            const headerH = isFirstPage ? FIRST_HEADER_H : SUB_HEADER_H;
+                            const availableH = PAGE_HEIGHT - PADDING_V - FOOTER_H - headerH;
+                            const cardH = cardHeights[i] || 200; // fallback
+
+                            if (usedHeight + cardH > availableH && currentComps.length > 0) {
+                                newPages.push({ comparisons: [...currentComps] });
+                                currentComps = [];
+                                usedHeight = 0;
+                                isFirstPage = false;
+                            }
+                            currentComps.push(allComparisons[i]);
+                            usedHeight += cardH;
                         }
-                        console.log("[CopyClean] 정밀 분석 완료 - 총 비교 항목:", allComparisons.length, "페이지:", contentPages.value.length);
+                        if (currentComps.length > 0) {
+                            newPages.push({ comparisons: currentComps });
+                        }
+
+                        contentPages.value = newPages;
+                        console.log("[CopyClean] 동적 페이지 배치 완료 -", newPages.length, "페이지, 카드별 높이:", cardHeights);
 
                         // 문서명 (페이지1용 - 확장자 없이)
                         if (!docTitle.value) docTitle.value = file.name;
