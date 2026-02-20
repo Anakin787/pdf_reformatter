@@ -1,0 +1,58 @@
+# GitHub Pages 배포
+# 배포 시 GEMINI_API_KEY(시크릿 또는 변수)를 HTML에 주입합니다.
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: github-pages
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Inject API Key
+        env:
+          # 시크릿 우선, 없으면 변수 사용 (Settings → Secrets and variables → Actions)
+          API_KEY: ${{ secrets.GEMINI_API_KEY || vars.GEMINI_API_KEY }}
+        run: |
+          if [ -z "$API_KEY" ]; then
+            echo "::warning::GEMINI_API_KEY가 설정되지 않았습니다. 시크릿 또는 변수를 등록하세요."
+            # 플레이스홀더 유지 (로컬 테스트용)
+          else
+            # macOS sed 호환: -i '' 대신 -i.bak 후 삭제
+            sed -i.bak "s|__GEMINI_API_KEY__|$API_KEY|g" PDF_Reformatter.html
+            rm -f PDF_Reformatter.html.bak
+          fi
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+          exclusion-list: |
+            .git
+            .github
+            .gitignore
+            docs
+            README.md
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
