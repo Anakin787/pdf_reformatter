@@ -43,6 +43,7 @@ jobs:
         run: |
           mkdir _site
           cp PDF_Reformatter.html _site/
+          cp PDF_Reformatter.html _site/index.html
           cp -f .nojekyll _site/ 2>/dev/null || true
 
       - name: Setup Pages
