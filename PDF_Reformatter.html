@@ -219,7 +219,7 @@
                             <h2 class="text-2xl font-black text-slate-900">카피클린 진단 결과서</h2>
                             <p class="text-xs text-blue-600 font-bold mt-1 tracking-widest">COPYCLEAN DIAGNOSTIC REPORT</p>
                         </div>
-                        <img src="origin.png" alt="CopyClean" style="height: 81px; object-fit: contain; margin-right: -5px; margin-bottom: -1px;">
+                        <img :src="originLogoDataUrl" alt="CopyClean" style="height: 81px; object-fit: contain; margin-right: -5px; margin-bottom: -1px;">
                     </div>
 
                     <!-- Meta Info Bar -->
@@ -415,7 +415,7 @@
                             <div class="space-y-4 text-sm">
                                 <div class="flex justify-between">
                                     <span class="text-slate-400">AI 유사도 개선을 포함한 종합 표절률 15% 이하 인간화 작업</span>
-                                    <span class="font-bold">₩250,000</span>
+                                    <span class="font-bold">₩{{ formattedPricingBase }}</span>
                                 </div>
                                 <div class="flex justify-between">
                                     <span class="text-slate-400">문헌 기반 표절률 개선으로 기준 수치 초과 문제 해결</span>
@@ -696,6 +696,8 @@
                 // 4. COMPUTED HELPERS
                 // ==========================================
                 const formattedPrice = computed(() => '₩' + servicePrice.value.toLocaleString());
+                const pricingBase = computed(() => Math.max(0, servicePrice.value - 45000));
+                const formattedPricingBase = computed(() => pricingBase.value.toLocaleString());
                 const getVerdictText = computed(() => numericRate.value > 30 ? "부적합" : (numericRate.value > 15 ? "고위험" : "안전"));
                 const getVerdictClass = computed(() => numericRate.value > 15 ? "verdict-danger" : "verdict-safe");
                 const getVerdictIcon = computed(() => numericRate.value > 30 ? "🛡️" : "✅");
@@ -1299,7 +1301,7 @@ JSON 출력:
                 };
 
                 return {
-                    paymentLink, servicePrice, reportId, docTitle, todayDate, logoDataUrl,
+                    paymentLink, servicePrice, reportId, docTitle, todayDate, logoDataUrl, originLogoDataUrl,
                     plagiarismRate, numericRate, status, progressText, isExporting,
                     pages, contentPages, qrCodeUrl,
                     diagnosisSummary, submissionNotes,
@@ -1307,7 +1309,7 @@ JSON 출력:
                     inspectionNo, originalDocName, comparisonTarget,
                     totalSentences, aiSimilarSentences, identicalSentences, suspiciousSentences, citationCount,
                     categoryRatios, generatedTimestamp, distributionBar,
-                    formattedPrice, getVerdictText, getVerdictClass, getVerdictIcon, getVerdictDesc,
+                    formattedPrice, formattedPricingBase, getVerdictText, getVerdictClass, getVerdictIcon, getVerdictDesc,
                     handleFileUpload, handleDrop, isDragging, downloadPDF, reset,
                     fileQueue, currentFileIndex, totalFiles, startQueue
                 };
